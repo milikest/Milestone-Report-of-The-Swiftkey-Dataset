@@ -1,0 +1,459 @@
+---
+title: "Milestone Report of The Swiftkey Dataset"
+author: "Mehmet İLİK"
+date: "24/07/2022"
+output: html_notebook
+---
+## Brief
+This report aims to investigate the Swiftkey Dataset. Dataset has four language set. We will examine the English data. The English data has three files named en_US.blogs.txt, en_US.news.txt, en_US.twitter.txt. Sentences from blogs, news and tweets were gathered in the data. We will explore the files, calculate the basic statistical measurements and hopefully make you have basic ideas about the data.
+
+### Downloading The Data
+
+```{r}
+data_url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+download.file(data_url, destfile ="./swiftkey.zip")
+
+unzip("./swiftkey.zip", exdir= getwd())
+```
+```{r}
+dir()
+```
+We have de_DE, en_US, fi_FI, ru_RU folders. In en_US folder we have three files: en_US.blogs.txt, en_US.news.txt, en_US.twitter.txt. We will create different folders to deploy csv files:
+```{r}
+dir.create("blogs")
+dir.create("news")
+dir.create("twitter")
+```
+
+```{r}
+dir("./en_US/")
+```
+Now let's load packages we need to use.
+```{r message=FALSE, warning=FALSE}
+library(tm)
+library(ggplot2)
+library(readr)
+library(stringi)
+library(SnowballC)
+library(wordcloud)
+library(dplyr)
+library(rbokeh)
+```
+
+# Twitter Data
+
+The txt files is large to work.Let's have a look at the twitter.txt file:
+
+```{r warning=FALSE}
+file_name <- './en_US/en_US.twitter.txt' 
+connection <- file(file_name)
+twitter_lines <- readLines(connection)
+size <- format(object.size(twitter_lines), units="Kb")
+line_count <- length(twitter_lines)
+total_words <- sum(stri_count_words(twitter_lines))
+close(connection)
+print(paste("Size of twitter.txt:",size))
+print(paste("Lines in twitter.txt:", line_count))
+print(paste("Word Counts in twitter.txt:", total_words))
+```
+We have 2,360,148 lines and 30,217,823 words in file. Let's have a look at some samples:
+```{r}
+connection <- file(file_name)
+sample_lines <- read_lines(connection,skip = 1520, n_max = 5)
+writeLines(sample_lines)
+```
+Tweets can contaion extra punctuations, emojis which can cause different characters than ASCII. So we need to clean them first. After that we will show how many times a word is used in our corpus. But to find frequencies of all words we need to create VCorpus object and convert it into  TermDocumentMatrix object and create a matrix with it. And finally make a data.frame of matrix so we can calculate the frequencies.  This will require too much memory which any personal computer can't handle. Because we have 2,360,148 lines and 30,217,823 words. So we will have a different approach. 
+
+## Algorithm
+1. Read 5000 lines of the file.
+2. Create VCorpus object with it.
+3. Clean the corpus.
+4. Create a TermDocumentMatrix.
+5. Create a matrix.
+6. Sort the words by their frequencies.
+7. Create a data frame.
+8. Write the data frame into a csv file in twitter
+9. Clear the memory so we can read another 5000 lines and reiterate.
+
+For the memory cleaning we need to create a function for the reading and writing. Because we can't clear the memory inside of a loop. 
+And we will create a function to clear the memory.
+We have 2,360,148 lines so we need to reiterate 472 times. 472*5000=2,360,000 and the last 148 lines will be read in outside of the loop.
+
+We will create extra functions to clean the data first:
+```{r}
+remove_internet_chars <- function(x){
+  x <- gsub("[^ ]{1,}@[^ ]{1,}"," ",x)
+  x <- gsub(" @[^ ]{1,}"," ", x)
+  x <- gsub("#[^ ]{1,}"," ",x)
+  x <- gsub("[^ ]{1,}://[^ ]{1,}"," ",x)
+  x
+}
+remove_symbols <- function(x){
+  x <- gsub("['??????]","'",x)
+  x <- gsub("^a-z']"," ", x)
+  x <- gsub("'{2,}", " '", x)
+  x <- gsub("' ", " ", x)
+  x <- gsub(" '"," ", x)
+  x <- gsub("^'","",x)
+  x <- gsub("'$","",x)
+  x <- gsub("[^\x01-\x7F]+","",x)
+  x
+}
+```
+
+```{r}
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 10000)
+corpustocsv <- function(start, end){
+for(i in start:start){
+cleaner()
+file_name <- './en_US/en_US.twitter.txt' 
+connection <- file(file_name)
+twitter_lines <- read_lines(connection, skip = i*5000, n_max = 5000)
+
+smallcorpus <- VCorpus(VectorSource(twitter_lines))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/twitter/tvit.",i*5000),"."),(i+1)*5000),".csv"))
+  }
+}
+
+cleaner <- function(n=1) {for (i in 1:n) gc()}
+
+for(i in 0:471){
+  cleaner()
+  corpustocsv(start = i, end = i+1)
+}
+cleaner()
+
+
+#Last Part
+file_name <- './en_US/en_US.twitter.txt' 
+connection <- file(file_name)
+twitter_lines <- read_lines(connection, skip = 2360000, n_max = 148)
+
+smallcorpus <- VCorpus(VectorSource(twitter_lines))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/twitter/tvit.",2360000),"."),2360148),".csv"))
+cleaner()
+```
+
+Now we have different csv files. Let's look at one of the csv files.
+
+```{r}
+sample_data <- read.csv("./en_US/twitter/tvit.0.5000.csv")
+head(sample_data)
+```
+So we have two columns: words and freq (frequencies). But keep in mind that every csv hasn't the same words. So when we are merging these csv files we will consider it.
+
+## Merging the CSV files
+Algorithm:
+1. Create a list contains list of the csv files.
+2. Iterate the list and read file in order.
+3. Drop the row names.
+4. Merge the csv data frame with previous data frame.
+5. Some words can be missing in previous data frame so they will appear as NA values, convert them to 0.
+6. Drop created columns because of merging.
+
+```{r}
+directory <- dir("./en_US/twitter/")
+csv_files <- directory[grepl(".csv",directory)]
+for(i in 1:length(csv_files)){
+  if(i == 1){
+  df1 <- read.csv(paste0("./en_US/twitter/",csv_files[i]))
+  df1 <- df1[-c(1)] 
+  }
+  else{
+  df2 <- read.csv(paste0("./en_US/twitter/",csv_files[i]))
+  df2 <- df2[-c(1)]
+  df1 <- df1 %>% full_join(df2, by="word")
+  df1[is.na(df1)] = 0 
+  df1$freq <- df1[,c(2)]+ df1[,c(3)]
+  df1 <- df1[-c(2,3)]
+  }
+}
+df1 <- df1[order(-df1$freq),]
+```
+
+Now we have words and frequencies in new data frame (df1).
+
+```{r}
+head(df1, 10)
+```
+How many words do we have?
+```{r}
+dim(df1)
+```
+477021 words are gathered. But we didn't clean the corpus for the typos and mistakenly merged words in tweets. 
+```{r}
+tail(df1,10)
+```
+We can do more cleaning and create a smaller data or we can ignore the words which have less than 3 frequency.
+
+```{r}
+sub_df1 <- df1%>% subset(freq > 4)
+dim(sub_df1)
+```
+Now let's make some plotting about our twitter data:
+```{r}
+wordcloud(words=df1$word, freq =df1$freq, min.freq =1, max.words=50, random.order=FALSE, rot.per=0.35, colors= brewer.pal(8,"Dark2"))
+```
+And let's look at the ratio of the words in corpus:
+
+```{r}
+figure(title ="Top 20 Words That Have Most Frequencies In Twitter Data", legend_location = "None", width = 750, height = 400) %>%
+  ly_bar(data = sub_df1[1:20,], word, freq, color=word, hover=F) %>% y_axis(number_formatter = "numeral")
+```
+
+# News Data
+
+We will have similar approach for the news data.
+```{r warning=FALSE}
+file_name <- './en_US/en_US.news.txt' 
+connection <- file(file_name)
+twitter_lines <- readLines(connection)
+size <- format(object.size(twitter_lines), units="Kb")
+line_count <- length(twitter_lines)
+total_words <- sum(stri_count_words(twitter_lines))
+close(connection)
+print(paste("Size of news.txt:",size))
+print(paste("Lines in news.txt:", line_count))
+print(paste("Word Counts in news.txt:", total_words))
+```
+```{r}
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 10000)
+corpustocsv <- function(start, end){
+for(i in start:start){
+cleaner()
+file_name <- './en_US/en_US.news.txt' 
+connection <- file(file_name)
+news_line <- read_lines(connection,skip = i*5000, n_max = 5000)
+
+smallcorpus <- VCorpus(VectorSource(news_line))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/news/news.",i*5000),"."),(i+1)*5000),".csv"))
+  }
+}
+
+for(i in 0:14){
+  cleaner()
+  corpustocsv(start = i, end = i+1)
+}
+cleaner()
+
+#Last Part
+
+file_name <- './en_US/en_US.news.txt' 
+connection <- file(file_name)
+news_line <- read_lines(connection,skip = 75000, n_max = 2259)
+
+smallcorpus <- VCorpus(VectorSource(news_line))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/news/news.",75000),"."),77259),".csv"))
+```
+
+Since we created the csv files for news data, we will merge them.
+
+```{r}
+directory <- dir("./en_US/news/")
+csv_files <- directory[grepl(".csv",directory)]
+for(i in 1:length(csv_files)){
+  if(i == 1){
+  df_news <- read.csv(paste0("./en_US/news/",csv_files[i]))
+  df_news <- df_news[-c(1)] 
+  }
+  else{
+  df2 <- read.csv(paste0("./en_US/news/",csv_files[i]))
+  df2 <- df2[-c(1)]
+  df_news <- df_news %>% full_join(df2, by="word")
+  df_news[is.na(df_news)] = 0 
+  df_news$freq <- df_news[,c(2)]+ df_news[,c(3)]
+  df_news <- df_news[-c(2,3)]
+  }
+}
+df_news <- df_news[order(-df_news$freq),]
+```
+
+Have a look at the df_news data:
+```{r}
+head(df_news)
+```
+
+And word cloud of the data:
+
+```{r}
+wordcloud(words=df_news$word, freq =df_news$freq, scale =c(8,.5), min.freq =1, max.words=50, random.order=FALSE, rot.per=0.35, colors= brewer.pal(8,"Set1"))
+
+```
+Bar chart of the top 20 words used in news data.
+```{r}
+figure(title ="Top 20 Words That Have Most Frequencies In News Data", legend_location = "None", width = 750, height = 400) %>%
+  ly_bar(data = df_news[1:20,], word, freq, color=word, hover=F) %>% y_axis(number_formatter = "numeral")
+```
+# Blogs
+```{r}
+file_name <- './en_US/en_US.blogs.txt' 
+connection <- file(file_name)
+blog_lines <- readLines(connection)
+size <- format(object.size(blog_lines), units="Kb")
+line_count <- length(blog_lines)
+total_words <- sum(stri_count_words(blog_lines))
+close(connection)
+print(paste("Size of blogs.txt:",size))
+print(paste("Lines in blogs.txt:", line_count))
+print(paste("Word Counts in blogs.txt:", total_words))
+```
+```{r}
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 10000)
+corpustocsv <- function(start, end){
+for(i in start:start){
+cleaner()
+file_name <- './en_US/en_US.blogs.txt' 
+connection <- file(file_name)
+news_line <- read_lines(connection,skip = i*5000, n_max = 5000)
+
+smallcorpus <- VCorpus(VectorSource(news_line))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/blogs/blogs.",i*5000),"."),(i+1)*5000),".csv"))
+  }
+}
+
+for(i in 0:178){
+  cleaner()
+  corpustocsv(start = i, end = i+1)
+}
+cleaner()
+
+#Last Part
+
+file_name <- './en_US/en_US.blogs.txt' 
+connection <- file(file_name)
+news_line <- read_lines(connection,skip = 895000, n_max = 4288)
+
+smallcorpus <- VCorpus(VectorSource(news_line))
+
+smallcorpus <- tm_map(smallcorpus, removePunctuation)
+smallcorpus <- tm_map(smallcorpus, content_transformer(tolower))
+smallcorpus <- tm_map(smallcorpus, removeNumbers)
+smallcorpus <- tm_map(smallcorpus, removeWords, stopwords("english"))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_internet_chars))
+smallcorpus <- tm_map(smallcorpus, content_transformer(remove_symbols))
+smallcorpus <- tm_map(smallcorpus, stripWhitespace)
+smallcorpus <- tm_map(smallcorpus, PlainTextDocument)
+
+dtmCorpus <- TermDocumentMatrix(smallcorpus)
+set.seed(100)
+corpusMatrix <- as.matrix(dtmCorpus)
+sortedMAtrix <- sort(rowSums(corpusMatrix), decreasing = TRUE)
+dfCorpus <- data.frame(word= names(sortedMAtrix), freq = sortedMAtrix)
+write.csv(dfCorpus,paste0(paste0(paste0(paste0("./en_US/blogs/blogs.",895000),"."),899288),".csv"))
+
+```
+
+Now merging the csv files for blogs:
+
+```{r}
+directory <- dir("./en_US/blogs/")
+csv_files <- directory[grepl(".csv",directory)]
+for(i in 1:length(csv_files)){
+  if(i == 1){
+  df_blogs <- read.csv(paste0("./en_US/blogs/",csv_files[i]))
+  df_blogs <- df_blogs[-c(1)] 
+  }
+  else{
+  df2 <- read.csv(paste0("./en_US/blogs/",csv_files[i]))
+  df2 <- df2[-c(1)]
+  df_blogs <- df_blogs %>% full_join(df2, by="word")
+  df_blogs[is.na(df_blogs)] = 0 
+  df_blogs$freq <- df_blogs[,c(2)]+ df_blogs[,c(3)]
+  df_blogs <- df_blogs[-c(2,3)]
+  }
+}
+df_blogs <- df_blogs[order(-df_blogs$freq),]
+```
+
+Have a look at df_blogs:
+
+```{r}
+head(df_blogs)
+```
+
+Wordcloud of df_blogs:
+```{r}
+wordcloud(words=df_blogs$word, freq =df_blogs$freq, min.freq =1, max.words=50, random.order=FALSE, rot.per=0.35, colors= brewer.pal(8,"Set2"))
+```
+And the bar chart of the most used words in blogs data.
+
+```{r}
+figure(title ="Top 20 Words That Have Most Frequencies In Blogs Data", legend_location = "None", width = 750, height = 400) %>%
+  ly_bar(data = df_blogs[1:20,], word, freq, color=word, hover=F) %>% y_axis(number_formatter = "numeral")
+```
+
